@@ -13,12 +13,43 @@ local DHC = {
     lastCastTime = 0,
     rotationEnabled = false,
     frame = nil,
-    debugMode = true, -- Debug mode enabled by default
+    debugMode = false, -- Debug mode disabled by default
     lastAlertTime = 0, -- Track last time we alerted player
     wasReady = false, -- Track if player was ready last update
     fullLogMode = false, -- Full event logging mode
 }
 
+-- Helper function to check if a unit is dead
+local function IsUnitDead(unitName)
+    if unitName == UnitName("player") then
+        return UnitIsDead("player") or UnitIsGhost("player")
+    end
+    
+    -- Check raid members
+    local numRaid = GetNumRaidMembers()
+    if numRaid > 0 then
+        for i = 1, numRaid do
+            local name = GetRaidRosterInfo(i)
+            if name == unitName then
+                local unitID = "raid" .. i
+                return UnitIsDead(unitID) or UnitIsGhost(unitID)
+            end
+        end
+    end
+    
+    -- Check party members
+    local numParty = GetNumPartyMembers()
+    if numParty > 0 then
+        for i = 1, numParty do
+            local unitID = "party" .. i
+            if UnitName(unitID) == unitName then
+                return UnitIsDead(unitID) or UnitIsGhost(unitID)
+            end
+        end
+    end
+    
+    return false
+end
 -- Helper function to check if player has Dark Harvest
 local function HasDarkHarvest(playerName)
     -- Can only check our own spellbook
@@ -114,6 +145,10 @@ local eventFrame = CreateFrame("Frame")
 eventFrame:RegisterEvent("CHAT_MSG_ADDON")
 eventFrame:RegisterEvent("PLAYER_TARGET_CHANGED")
 eventFrame:RegisterEvent("PLAYER_REGEN_DISABLED")
+eventFrame:RegisterEvent("UNIT_HEALTH")
+eventFrame:RegisterEvent("PLAYER_DEAD")
+eventFrame:RegisterEvent("PLAYER_ALIVE")
+eventFrame:RegisterEvent("PLAYER_UNGHOST")
 eventFrame:RegisterEvent("UNIT_SPELLCAST_SENT")
 eventFrame:RegisterEvent("UNIT_SPELLCAST_SUCCEEDED")
 eventFrame:RegisterEvent("UNIT_SPELLCAST_STOP")
@@ -161,8 +196,12 @@ end
 
 -- Scan raid for warlocks
 function DHC:ScanRaid()
+    -- Store old warlock data to preserve cooldowns
+    local oldWarlocks = self.warlocks
     self.warlocks = {}
+    
     local numRaid = GetNumRaidMembers()
+    local foundNewWarlock = false
     
     if DHC.debugMode then
         DEFAULT_CHAT_FRAME:AddMessage("|cff9482c9DHC Debug:|r Scanning... NumRaidMembers = " .. numRaid)
@@ -176,19 +215,33 @@ function DHC:ScanRaid()
             end
             if class == "Warlock" and name then
                 local hasDH = HasDarkHarvest(name)
-                self.warlocks[name] = {
-                    name = name,
-                    lastCast = 0,
-                    ready = true,
-                    hasDarkHarvest = hasDH,
-                }
+                
+                -- Preserve old data if warlock was already tracked
+                if oldWarlocks[name] then
+                    self.warlocks[name] = oldWarlocks[name]
+                    -- Update hasDarkHarvest in case it changed
+                    if name == UnitName("player") then
+                        self.warlocks[name].hasDarkHarvest = hasDH
+                    end
+                else
+                    -- New warlock joined
+                    foundNewWarlock = true
+                    self.warlocks[name] = {
+                        name = name,
+                        lastCast = 0,
+                        ready = true,
+                        hasDarkHarvest = hasDH,
+                    }
+                    DEFAULT_CHAT_FRAME:AddMessage("|cff9482c9DHC:|r " .. name .. " joined the group")
+                end
+                
                 if DHC.debugMode then
-                    DEFAULT_CHAT_FRAME:AddMessage("|cff9482c9DHC:|r Added warlock: " .. name .. " (DH: " .. tostring(hasDH) .. ")")
+                    DEFAULT_CHAT_FRAME:AddMessage("|cff9482c9DHC:|r Added warlock: " .. name .. " (DH: " .. tostring(self.warlocks[name].hasDarkHarvest) .. ")")
                 end
             end
         end
     else
-        -- Check if player is a warlock
+        -- Check if player is a warlock (solo or in party)
         local playerName = UnitName("player")
         local _, class = UnitClass("player")
         if DHC.debugMode then
@@ -196,16 +249,36 @@ function DHC:ScanRaid()
         end
         if class == "Warlock" then
             local hasDH = HasDarkHarvest(playerName)
-            self.warlocks[playerName] = {
-                name = playerName,
-                lastCast = 0,
-                ready = true,
-                hasDarkHarvest = hasDH,
-            }
+            
+            -- Preserve old data if exists
+            if oldWarlocks[playerName] then
+                self.warlocks[playerName] = oldWarlocks[playerName]
+                self.warlocks[playerName].hasDarkHarvest = hasDH
+            else
+                self.warlocks[playerName] = {
+                    name = playerName,
+                    lastCast = 0,
+                    ready = true,
+                    hasDarkHarvest = hasDH,
+                }
+            end
+            
             if DHC.debugMode then
                 DEFAULT_CHAT_FRAME:AddMessage("|cff9482c9DHC:|r Added warlock: " .. playerName .. " (DH: " .. tostring(hasDH) .. ")")
             end
         end
+    end
+    
+    -- Check for warlocks who left
+    for name, _ in pairs(oldWarlocks) do
+        if not self.warlocks[name] then
+            DEFAULT_CHAT_FRAME:AddMessage("|cff9482c9DHC:|r " .. name .. " left the group")
+        end
+    end
+    
+    -- If a new warlock joined, broadcast our DH status
+    if foundNewWarlock then
+        self:BroadcastDarkHarvestStatus()
     end
     
     self:RebuildRotation()
@@ -242,6 +315,10 @@ function DHC:CheckAutoShow()
     if rotationCount > 1 and not self.frame:IsVisible() then
         self.frame:Show()
         DEFAULT_CHAT_FRAME:AddMessage("|cff9482c9DHC:|r Window auto-opened (multiple warlocks detected)")
+    -- Auto-hide if 1 or fewer warlocks
+    elseif rotationCount <= 1 and self.frame:IsVisible() then
+        self.frame:Hide()
+        DEFAULT_CHAT_FRAME:AddMessage("|cff9482c9DHC:|r Window closed (left group)")
     end
 end
 
@@ -319,10 +396,32 @@ function DHC:AdvanceRotation()
     local rotationCount = getn(self.rotation)
     if rotationCount == 0 then return end
     
-    self.currentIndex = self.currentIndex + 1
-    if self.currentIndex > rotationCount then
-        self.currentIndex = 1
-    end
+    local startIndex = self.currentIndex
+    local attempts = 0
+    
+    -- Loop until we find a living warlock or we've checked everyone
+    repeat
+        self.currentIndex = self.currentIndex + 1
+        if self.currentIndex > rotationCount then
+            self.currentIndex = 1
+        end
+        
+        attempts = attempts + 1
+        local nextWarlock = self.rotation[self.currentIndex]
+        
+        -- If this warlock is alive, we're done
+        if not IsUnitDead(nextWarlock) then
+            break
+        end
+        
+        -- If we've checked everyone and they're all dead, stay on current
+        if attempts >= rotationCount then
+            if DHC.debugMode then
+                DEFAULT_CHAT_FRAME:AddMessage("|cff9482c9DHC:|r All warlocks are dead, rotation cannot advance")
+            end
+            break
+        end
+    until false
 end
 
 -- Send addon message
@@ -439,7 +538,9 @@ function DHC:UpdateDisplay()
         end
         
         local cdText = ""
-        if data.ready then
+        if IsUnitDead(name) then
+            cdText = "|cffff0000DEAD|r"
+        elseif data.ready then
             cdText = "|cff00ff00READY|r"
         elseif data.lastCast > 0 then
             local remaining = DARK_HARVEST_COOLDOWN - (currentTime - data.lastCast)
@@ -511,6 +612,11 @@ eventFrame:SetScript("OnEvent", function()
     elseif event == "PLAYER_REGEN_DISABLED" then
         -- Entered combat - broadcast Dark Harvest status
         DHC.BroadcastDarkHarvestStatus(DHC)
+    elseif event == "UNIT_HEALTH" or event == "PLAYER_DEAD" or event == "PLAYER_ALIVE" or event == "PLAYER_UNGHOST" then
+        -- Update display when health changes (to detect deaths/resurrections)
+        if DHC.frame:IsVisible() then
+            DHC.UpdateDisplay(DHC)
+        end
     elseif event == "UNIT_SPELLCAST_SENT" or event == "UNIT_SPELLCAST_SUCCEEDED" or 
            event == "UNIT_SPELLCAST_STOP" or event == "UNIT_SPELLCAST_FAILED" then
         -- Only debug YOUR spells
