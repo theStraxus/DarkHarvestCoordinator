@@ -1,0 +1,6 @@
+## Interface: 11200
+## Title: Dark Harvest Coordinator
+## Notes: Coordinates Warlock Dark Harvest rotation
+## Author: .straxus
+## Version: 1.0
+DarkHarvestCoordinator.lua
