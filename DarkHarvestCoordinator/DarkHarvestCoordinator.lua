@@ -761,7 +761,7 @@ eventFrame:SetScript("OnEvent", function()
                         string.match(arg1, "(.+) casts dark harvest")
                 
                 if caster then
-                    -- Check if this warlock is in our rotation
+                    -- Check if this warlock is in our rotation (in our group)
                     if DHC.warlocks[caster] then
                         local currentTime = GetTime()
                         local timeSinceLast = currentTime - DHC.warlocks[caster].lastCast
@@ -776,6 +776,11 @@ eventFrame:SetScript("OnEvent", function()
                                 DEFAULT_CHAT_FRAME:AddMessage("|cff9482c9DHC Debug:|r Detected cast by: " .. caster)
                             end
                             DHC.OnDarkHarvestCast(DHC, caster)
+                        end
+                    else
+                        -- This warlock is not in our group, ignore them
+                        if DHC.debugMode then
+                            DEFAULT_CHAT_FRAME:AddMessage("|cff9482c9DHC Debug:|r Ignoring " .. caster .. " (not in our group)")
                         end
                     end
                 end
