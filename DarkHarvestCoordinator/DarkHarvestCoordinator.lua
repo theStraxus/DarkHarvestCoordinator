@@ -14,6 +14,7 @@ local DHC = {
     rotationEnabled = false,
     frame = nil,
     debugMode = false, -- Debug mode disabled by default
+    notifyMode = false, -- Notify mode disabled by default
     lastAlertTime = 0, -- Track last time we alerted player
     wasReady = false, -- Track if player was ready last update
     fullLogMode = false, -- Full event logging mode
@@ -232,7 +233,9 @@ function DHC:ScanRaid()
                         ready = true,
                         hasDarkHarvest = hasDH,
                     }
-                    DEFAULT_CHAT_FRAME:AddMessage("|cff9482c9DHC:|r " .. name .. " joined the group")
+                    if DHC.notifyMode then
+                        DEFAULT_CHAT_FRAME:AddMessage("|cff9482c9DHC:|r " .. name .. " joined the group")
+                    end
                 end
                 
                 if DHC.debugMode then
@@ -272,7 +275,9 @@ function DHC:ScanRaid()
     -- Check for warlocks who left
     for name, _ in pairs(oldWarlocks) do
         if not self.warlocks[name] then
-            DEFAULT_CHAT_FRAME:AddMessage("|cff9482c9DHC:|r " .. name .. " left the group")
+            if DHC.notifyMode then
+                DEFAULT_CHAT_FRAME:AddMessage("|cff9482c9DHC:|r " .. name .. " left the group")
+            end
         end
     end
     
@@ -304,7 +309,9 @@ function DHC:RebuildRotation()
     -- Auto-enable rotation if more than 1 warlock with DH
     if rotationCount > 1 and not self.rotationEnabled then
         self.rotationEnabled = true
-        DEFAULT_CHAT_FRAME:AddMessage("|cff9482c9DHC:|r Rotation auto-enabled (" .. rotationCount .. " warlocks)")
+        if DHC.debugMode then
+            DEFAULT_CHAT_FRAME:AddMessage("|cff9482c9DHC:|r Rotation auto-enabled (" .. rotationCount .. " warlocks)")
+        end
     end
 end
 
@@ -314,11 +321,15 @@ function DHC:CheckAutoShow()
     -- Auto-show if more than 1 warlock and window isn't already shown
     if rotationCount > 1 and not self.frame:IsVisible() then
         self.frame:Show()
-        DEFAULT_CHAT_FRAME:AddMessage("|cff9482c9DHC:|r Window auto-opened (multiple warlocks detected)")
+        if DHC.debugMode then
+            DEFAULT_CHAT_FRAME:AddMessage("|cff9482c9DHC:|r Window auto-opened (multiple warlocks detected)")
+        end
     -- Auto-hide if 1 or fewer warlocks
     elseif rotationCount <= 1 and self.frame:IsVisible() then
         self.frame:Hide()
-        DEFAULT_CHAT_FRAME:AddMessage("|cff9482c9DHC:|r Window closed (left group)")
+        if DHC.debugMode then
+            DEFAULT_CHAT_FRAME:AddMessage("|cff9482c9DHC:|r Window closed (left group)")
+        end
     end
 end
 
@@ -327,9 +338,13 @@ function DHC:ToggleRotation()
     self.rotationEnabled = not self.rotationEnabled
     if self.rotationEnabled then
         self:SendMessage("ROTATION_START", self.currentIndex)
-        DEFAULT_CHAT_FRAME:AddMessage("|cff9482c9DHC:|r Rotation enabled")
+        if DHC.debugMode then
+            DEFAULT_CHAT_FRAME:AddMessage("|cff9482c9DHC:|r Rotation enabled")
+        end
     else
-        DEFAULT_CHAT_FRAME:AddMessage("|cff9482c9DHC:|r Rotation disabled")
+        if DHC.debugMode then
+            DEFAULT_CHAT_FRAME:AddMessage("|cff9482c9DHC:|r Rotation disabled")
+        end
     end
     self:UpdateDisplay()
 end
@@ -357,7 +372,9 @@ function DHC:OnDarkHarvestCast(caster)
     self.warlocks[caster].ready = false
     self.lastCastTime = currentTime
     
-    DEFAULT_CHAT_FRAME:AddMessage("|cff9482c9DHC:|r " .. caster .. " cast Dark Harvest!")
+    if DHC.debugMode then
+        DEFAULT_CHAT_FRAME:AddMessage("|cff9482c9DHC:|r " .. caster .. " cast Dark Harvest!")
+    end
     
     -- Move to next in rotation if enabled
     if self.rotationEnabled then
@@ -375,7 +392,9 @@ function DHC:OnCooldownRefund(warlock)
     self.warlocks[warlock].lastCast = 0
     self.warlocks[warlock].ready = true
     
-    DEFAULT_CHAT_FRAME:AddMessage("|cff9482c9DHC:|r " .. warlock .. "'s Dark Harvest cooldown was REFUNDED!")
+    if DHC.debugMode then
+        DEFAULT_CHAT_FRAME:AddMessage("|cff9482c9DHC:|r " .. warlock .. "'s Dark Harvest cooldown was REFUNDED!")
+    end
     
     self:UpdateDisplay()
 end
@@ -384,7 +403,9 @@ end
 function DHC:ManualCast()
     local playerName = UnitName("player")
     if not self.warlocks[playerName] then
-        DEFAULT_CHAT_FRAME:AddMessage("|cff9482c9DHC:|r You are not a warlock in the rotation!")
+        if DHC.debugMode then
+            DEFAULT_CHAT_FRAME:AddMessage("|cff9482c9DHC:|r You are not a warlock in the rotation!")
+        end
         return
     end
     
@@ -441,7 +462,7 @@ function DHC:BroadcastDarkHarvestStatus()
     local status = hasDH and "1" or "0"
     self:SendMessage("HASDH", playerName .. ":" .. status)
     
-    if DHC.debugMode then
+    if DHC.notifyMode then
         DEFAULT_CHAT_FRAME:AddMessage("|cff9482c9DHC:|r Broadcasting DH status: " .. tostring(hasDH))
     end
 end
@@ -695,8 +716,10 @@ eventFrame:SetScript("OnEvent", function()
                 if string.find(event, "SELF") or event == "CHAT_MSG_SPELL_PERIODIC_SELF_DAMAGE" or 
                    event == "CHAT_MSG_SPELL_SELF_DAMAGE" or event == "CHAT_MSG_SPELL_SELF_BUFF" then
                     local playerName = UnitName("player")
-                    DEFAULT_CHAT_FRAME:AddMessage("|cff9482c9DHC Debug:|r Found YOUR Dark Harvest affliction!")
-                    DEFAULT_CHAT_FRAME:AddMessage("|cff9482c9DHC Debug:|r Full message: " .. arg1)
+                    if DHC.debugMode then
+                        DEFAULT_CHAT_FRAME:AddMessage("|cff9482c9DHC Debug:|r Found YOUR Dark Harvest affliction!")
+                        DEFAULT_CHAT_FRAME:AddMessage("|cff9482c9DHC Debug:|r Full message: " .. arg1)
+                    end
                     
                     -- Check if enough time has passed since last cast (28 seconds minimum)
                     if DHC.warlocks[playerName] then
@@ -704,16 +727,22 @@ eventFrame:SetScript("OnEvent", function()
                         local timeSinceLast = currentTime - DHC.warlocks[playerName].lastCast
                         
                         if timeSinceLast >= 28 or DHC.warlocks[playerName].lastCast == 0 then
-                            DEFAULT_CHAT_FRAME:AddMessage("|cff9482c9DHC Debug:|r Registering your cast (time since last: " .. timeSinceLast .. "s)")
+                            if DHC.debugMode then
+                                DEFAULT_CHAT_FRAME:AddMessage("|cff9482c9DHC Debug:|r Registering your cast (time since last: " .. timeSinceLast .. "s)")
+                            end
                             DHC.OnDarkHarvestCast(DHC, playerName)
                         else
-                            DEFAULT_CHAT_FRAME:AddMessage("|cff9482c9DHC Debug:|r Ignoring affliction (only " .. timeSinceLast .. "s since last cast)")
+                            if DHC.debugMode then
+                                DEFAULT_CHAT_FRAME:AddMessage("|cff9482c9DHC Debug:|r Ignoring affliction (only " .. timeSinceLast .. "s since last cast)")
+                            end
                         end
                     end
                 else
                     -- It's from another warlock - try to extract their name
-                    DEFAULT_CHAT_FRAME:AddMessage("|cff9482c9DHC Debug:|r Found Dark Harvest affliction from another warlock!")
-                    DEFAULT_CHAT_FRAME:AddMessage("|cff9482c9DHC Debug:|r Full message: " .. arg1)
+                    if DHC.debugMode then
+                        DEFAULT_CHAT_FRAME:AddMessage("|cff9482c9DHC Debug:|r Found Dark Harvest affliction from another warlock!")
+                        DEFAULT_CHAT_FRAME:AddMessage("|cff9482c9DHC Debug:|r Full message: " .. arg1)
+                    end
                     -- Pattern might be different for other warlocks' afflictions
                 end
             -- Check for damage ticks as backup
@@ -850,4 +879,6 @@ end
 
 -- Initialize on load
 DHC.Initialize(DHC)
-DEFAULT_CHAT_FRAME:AddMessage("|cff9482c9Dark Harvest Coordinator loaded! Type /dhc for commands|r")
+if DHC.debugMode then
+    DEFAULT_CHAT_FRAME:AddMessage("|cff9482c9Dark Harvest Coordinator loaded! Type /dhc for commands|r")
+end
