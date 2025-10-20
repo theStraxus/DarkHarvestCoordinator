@@ -828,22 +828,28 @@ eventFrame:SetScript("OnEvent", function()
                 end
             else
                 -- Try to find cast messages from other warlocks
-                if arg1 then
-                    local caster = string.match(arg1, "from (.+)'s Dark Harvest") or 
-                            string.match(arg1, "from (.+)'s dark harvest") or
-                            string.match(arg1, "(.+) casts Dark Harvest onto") or 
-                            string.match(arg1, "(.+) casts dark harvest onto") or
-                            string.match(arg1, "(.+) casts Dark Harvest") or 
-                            string.match(arg1, "(.+) casts dark harvest")
+                -- Only process if NOT a periodic creature damage event (those are damage ticks)
+                if arg1 and event ~= "CHAT_MSG_SPELL_PERIODIC_CREATURE_DAMAGE" and event ~= "CHAT_MSG_SPELL_PERIODIC_HOSTILEPLAYER_DAMAGE" then
+                    local caster = nil
+                    local success, result = pcall(function()
+                        return string.match(arg1, "from (.+)'s Dark Harvest") or 
+                               string.match(arg1, "from (.+)'s dark harvest") or
+                               string.match(arg1, "(.+) casts Dark Harvest onto") or 
+                               string.match(arg1, "(.+) casts dark harvest onto") or
+                               string.match(arg1, "(.+) casts Dark Harvest") or 
+                               string.match(arg1, "(.+) casts dark harvest")
+                    end)
                     
-                    if caster then
-                        if DHC.warlocks[caster] then
-                            local currentTime = GetTime()
-                            local timeSinceLast = currentTime - DHC.warlocks[caster].lastCast
-                            
-                            if timeSinceLast >= 10 then
-                                DHC.OnDarkHarvestCast(DHC, caster)
-                            end
+                    if success and result then
+                        caster = result
+                    end
+                    
+                    if caster and DHC.warlocks[caster] then
+                        local currentTime = GetTime()
+                        local timeSinceLast = currentTime - DHC.warlocks[caster].lastCast
+                        
+                        if timeSinceLast >= 10 then
+                            DHC.OnDarkHarvestCast(DHC, caster)
                         end
                     end
                 end
