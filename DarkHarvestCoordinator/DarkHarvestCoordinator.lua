@@ -499,7 +499,20 @@ function DHC:OnDarkHarvestCast(caster)
     self.lastCastTime = currentTime
     
     if self.rotationEnabled then
-        self:AdvanceRotation()
+        -- Find the caster's position in rotation
+        local casterIndex = nil
+        for i = 1, getn(self.rotation) do
+            if self.rotation[i] == caster then
+                casterIndex = i
+                break
+            end
+        end
+        
+        -- If caster is in rotation, advance from their position
+        if casterIndex then
+            self.currentIndex = casterIndex
+            self:AdvanceRotation()
+        end
     end
     
     self:SendMessage("CAST", caster)
@@ -814,22 +827,23 @@ eventFrame:SetScript("OnEvent", function()
                     end
                 end
             else
-                local caster = nil
-                
-                caster = string.match(arg1, "from (.+)'s Dark Harvest") or 
-                        string.match(arg1, "from (.+)'s dark harvest") or
-                        string.match(arg1, "(.+) casts Dark Harvest onto") or 
-                        string.match(arg1, "(.+) casts dark harvest onto") or
-                        string.match(arg1, "(.+) casts Dark Harvest") or 
-                        string.match(arg1, "(.+) casts dark harvest")
-                
-                if caster then
-                    if DHC.warlocks[caster] then
-                        local currentTime = GetTime()
-                        local timeSinceLast = currentTime - DHC.warlocks[caster].lastCast
-                        
-                        if timeSinceLast >= 10 then
-                            DHC.OnDarkHarvestCast(DHC, caster)
+                -- Try to find cast messages from other warlocks
+                if arg1 then
+                    local caster = string.match(arg1, "from (.+)'s Dark Harvest") or 
+                            string.match(arg1, "from (.+)'s dark harvest") or
+                            string.match(arg1, "(.+) casts Dark Harvest onto") or 
+                            string.match(arg1, "(.+) casts dark harvest onto") or
+                            string.match(arg1, "(.+) casts Dark Harvest") or 
+                            string.match(arg1, "(.+) casts dark harvest")
+                    
+                    if caster then
+                        if DHC.warlocks[caster] then
+                            local currentTime = GetTime()
+                            local timeSinceLast = currentTime - DHC.warlocks[caster].lastCast
+                            
+                            if timeSinceLast >= 10 then
+                                DHC.OnDarkHarvestCast(DHC, caster)
+                            end
                         end
                     end
                 end
